@@ -5,7 +5,7 @@ export default {
     extend: {
       colors: {
         dellut: {
-          red: "#C02E35", // Vermelho exato da marca
+          red: "#C02E35", 
           dark: "#1a1a1a",
         },
       },

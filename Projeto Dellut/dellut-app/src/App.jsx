@@ -4,36 +4,53 @@ import Checklist from "./components/Checklist";
 import Admin from "./components/Admin";
 
 function App() {
-  // Estado para saber quem está logado (null = ninguém)
   const [user, setUser] = useState(null);
 
-  // Função que será chamada quando o formulário de Login for enviado
+  // Estado para guardar todas as vistorias (nosso "Banco de Dados" temporário)
+  const [vistorias, setVistorias] = useState([]);
+
   const handleLogin = (username, password) => {
-    // Validação simples (mock)
     if (!username || !password) {
       alert("Preencha todos os campos!");
       return;
     }
-
-    // Aqui definimos quem entrou
     setUser(username.toLowerCase());
   };
 
-  // Função para sair
   const handleLogout = () => {
     setUser(null);
   };
 
-  // Lógica de Roteamento (Renderização Condicional)
-  if (!user) {
-    return <Login onLogin={handleLogin} />;
-  }
+  // Função que o Checklist vai chamar quando clicar em "Enviar"
+  const handleSaveVistoria = (novaVistoria) => {
+    const dadosCompletos = {
+      ...novaVistoria,
+      id: Date.now(), // ID único baseado no tempo
+      autor: user,
+      data: new Date().toLocaleString("pt-BR"),
+    };
 
-  if (user === "admin") {
-    return <Admin onLogout={handleLogout} />;
-  }
+    // Adiciona a nova vistoria no topo da lista
+    setVistorias([dadosCompletos, ...vistorias]);
 
-  return <Checklist user={user} onLogout={handleLogout} />;
+    console.log("Vistorias salvas:", [dadosCompletos, ...vistorias]);
+  };
+
+  // Roteamento
+  if (!user) return <Login onLogin={handleLogin} />;
+
+  // Passamos a lista de vistorias para o Admin ver
+  if (user === "admin")
+    return <Admin vistorias={vistorias} onLogout={handleLogout} />;
+
+  // Passamos a função de salvar para o Checklist usar
+  return (
+    <Checklist
+      user={user}
+      onLogout={handleLogout}
+      onSave={handleSaveVistoria}
+    />
+  );
 }
 
 export default App;
