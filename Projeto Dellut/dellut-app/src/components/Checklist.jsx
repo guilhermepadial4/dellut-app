@@ -1,28 +1,68 @@
 import React, { useState } from "react";
-import { Camera, Trash2, Send, LogOut, CheckCircle } from "lucide-react";
+import {
+  Camera,
+  Trash2,
+  Send,
+  LogOut,
+  CheckCircle,
+  Loader2,
+} from "lucide-react"; // Adicionei Loader2
+import { db } from "../firebase"; // Importa o banco de dados
+import { collection, addDoc } from "firebase/firestore"; // Importa funções de salvar
 
-const Checklist = ({ user, onLogout, onSave }) => {
+const Checklist = ({ user, onLogout }) => {
   const [km, setKm] = useState("");
   const [placa, setPlaca] = useState("");
-  const [photos, setPhotos] = useState([]); // Guarda as URLs das imagens para preview
-  const [enviado, setEnviado] = useState(false); // Feedback visual de sucesso
+
+  // Mudamos para controlar Arquivos (upload) e Previews (visual) separadamente
+  const [files, setFiles] = useState([]);
+  const [previews, setPreviews] = useState([]);
+
+  const [loading, setLoading] = useState(false); // Estado para travar botão enquanto envia
+  const [enviado, setEnviado] = useState(false);
+
+  // --- SUAS CHAVES DO CLOUDINARY ---
+  const CLOUD_NAME = "dyzvdmjtg";
+  const UPLOAD_PRESET = "dyzvdmjtg";
 
   // Lógica para processar as fotos selecionadas
   const handlePhotoUpload = (e) => {
-    const files = Array.from(e.target.files);
+    if (!e.target.files || e.target.files.length === 0) return;
 
-    // Cria URLs temporárias para mostrar o preview
-    const newPhotos = files.map((file) => URL.createObjectURL(file));
+    const newFiles = Array.from(e.target.files);
 
-    setPhotos([...photos, ...newPhotos]);
+    // Cria URLs temporárias apenas para mostrar na tela agora
+    const newPreviews = newFiles.map((file) => URL.createObjectURL(file));
+
+    setFiles([...files, ...newFiles]);
+    setPreviews([...previews, ...newPreviews]);
   };
 
-  // Remover uma foto específica da lista
+  // Remover uma foto específica
   const removePhoto = (indexToRemove) => {
-    setPhotos(photos.filter((_, index) => index !== indexToRemove));
+    setFiles(files.filter((_, index) => index !== indexToRemove));
+    setPreviews(previews.filter((_, index) => index !== indexToRemove));
   };
 
-  const handleSubmit = (e) => {
+  // Função que manda a foto para o Cloudinary
+  const uploadToCloudinary = async (file) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("upload_preset", UPLOAD_PRESET);
+
+    const response = await fetch(
+      `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+
+    const data = await response.json();
+    return data.secure_url; // Retorna o link da imagem na internet
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (!km || !placa) {
@@ -30,41 +70,53 @@ const Checklist = ({ user, onLogout, onSave }) => {
       return;
     }
 
-    if (photos.length === 0) {
+    if (files.length === 0) {
       alert("É necessário tirar pelo menos uma foto!");
       return;
     }
 
-    // Envia os dados para o App.jsx
-    onSave({
-      km,
-      placa,
-      fotos: photos,
-    });
+    setLoading(true); // Ativa o carregamento
 
-    // Mostra mensagem de sucesso e limpa o form
-    setEnviado(true);
-    setTimeout(() => {
-      setEnviado(false);
-      setKm("");
-      setPlaca("");
-      setPhotos([]);
-    }, 3000);
+    try {
+      // 1. Envia as fotos para o Cloudinary e espera os links voltarem
+      const uploadPromises = files.map((file) => uploadToCloudinary(file));
+      const photosUrls = await Promise.all(uploadPromises);
+
+      // 2. Salva os dados no Firebase com os links das fotos
+      await addDoc(collection(db, "vistorias"), {
+        km: km,
+        placa: placa,
+        fotos: photosUrls,
+        autor: user,
+        data: new Date().toLocaleString("pt-BR"),
+        timestamp: new Date(),
+      });
+
+      // 3. Sucesso!
+      setEnviado(true);
+      setTimeout(() => {
+        setEnviado(false);
+        setKm("");
+        setPlaca("");
+        setFiles([]);
+        setPreviews([]);
+        setLoading(false);
+      }, 3000);
+    } catch (error) {
+      console.error("Erro ao enviar:", error);
+      alert("Erro ao enviar. Verifique sua conexão.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Se acabou de enviar, mostra tela de sucesso
   if (enviado) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-green-50 p-6 text-center">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-green-50 p-6 text-center animate-pulse">
         <CheckCircle size={64} className="text-green-500 mb-4" />
         <h2 className="text-2xl font-bold text-gray-800">Vistoria Enviada!</h2>
         <p className="text-gray-600 mt-2">Os dados foram salvos com sucesso.</p>
-        <button
-          onClick={() => setEnviado(false)}
-          className="mt-8 text-green-700 font-bold underline"
-        >
-          Voltar
-        </button>
       </div>
     );
   }
@@ -103,6 +155,7 @@ const Checklist = ({ user, onLogout, onSave }) => {
                 className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-dellut-red outline-none text-lg"
                 value={km}
                 onChange={(e) => setKm(e.target.value)}
+                disabled={loading}
               />
             </div>
 
@@ -114,6 +167,7 @@ const Checklist = ({ user, onLogout, onSave }) => {
                 className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-dellut-red outline-none bg-white"
                 value={placa}
                 onChange={(e) => setPlaca(e.target.value)}
+                disabled={loading}
               >
                 <option value="" disabled>
                   Selecione...
@@ -134,16 +188,22 @@ const Checklist = ({ user, onLogout, onSave }) => {
                 Evidências
               </h3>
               <span className="text-xs text-gray-400">
-                {photos.length} fotos adicionadas
+                {previews.length} fotos adicionadas
               </span>
             </div>
 
             {/* Botão de Câmera Customizado */}
-            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 hover:border-dellut-red transition-colors">
+            <label
+              className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
+                loading
+                  ? "bg-gray-100 border-gray-300"
+                  : "border-gray-300 hover:bg-gray-50 hover:border-dellut-red"
+              }`}
+            >
               <div className="flex flex-col items-center justify-center pt-5 pb-6">
                 <Camera size={32} className="text-gray-400 mb-2" />
                 <p className="text-sm text-gray-500 font-medium">
-                  Toque para tirar foto
+                  {loading ? "Aguarde..." : "Toque para tirar foto"}
                 </p>
               </div>
               <input
@@ -152,26 +212,29 @@ const Checklist = ({ user, onLogout, onSave }) => {
                 accept="image/*"
                 multiple
                 onChange={handlePhotoUpload}
+                disabled={loading}
               />
             </label>
 
             {/* Grid de Preview */}
-            {photos.length > 0 && (
+            {previews.length > 0 && (
               <div className="grid grid-cols-3 gap-2 mt-4">
-                {photos.map((photo, index) => (
+                {previews.map((photo, index) => (
                   <div key={index} className="relative aspect-square group">
                     <img
                       src={photo}
                       alt="Preview"
                       className="w-full h-full object-cover rounded-md"
                     />
-                    <button
-                      type="button"
-                      onClick={() => removePhoto(index)}
-                      className="absolute top-1 right-1 bg-red-600 text-white p-1 rounded-full opacity-90 shadow-sm"
-                    >
-                      <Trash2 size={12} />
-                    </button>
+                    {!loading && (
+                      <button
+                        type="button"
+                        onClick={() => removePhoto(index)}
+                        className="absolute top-1 right-1 bg-red-600 text-white p-1 rounded-full opacity-90 shadow-sm"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -181,10 +244,19 @@ const Checklist = ({ user, onLogout, onSave }) => {
           {/* Botão Enviar */}
           <button
             type="submit"
-            className="w-full bg-dellut-red text-white font-bold py-4 rounded-xl shadow-lg hover:bg-red-700 transition-colors flex items-center justify-center gap-2 text-lg"
+            disabled={loading}
+            className={`w-full text-white font-bold py-4 rounded-xl shadow-lg transition-colors flex items-center justify-center gap-2 text-lg ${
+              loading
+                ? "bg-gray-400 cursor-not-allowed"
+                : "bg-dellut-red hover:bg-red-700"
+            }`}
           >
-            <Send size={20} />
-            Enviar Checklist
+            {loading ? (
+              <Loader2 size={24} className="animate-spin" />
+            ) : (
+              <Send size={20} />
+            )}
+            {loading ? "Enviando..." : "Enviar Checklist"}
           </button>
         </form>
       </main>
